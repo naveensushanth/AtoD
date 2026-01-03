@@ -1,5 +1,5 @@
 """
-Azure Architecture Diagram Analyzer - Core Analysis Module
+Azure Architecture Diagram Analyzer - Core Analysis Module (FIXED)
 This module provides the DiagramAnalyzer class for analyzing Azure architecture diagrams
 using Google's Gemini AI model.
 """
@@ -28,15 +28,16 @@ class DiagramAnalyzer:
         """
         self.api_key = api_key
         
-        # Map user-friendly names to actual model identifiers
+        # FIX: Remove -latest suffix from model names
+        # The correct format is just "gemini-1.5-flash" not "gemini-1.5-flash-latest"
         model_mapping = {
-            "gemini-1.5-flash": "gemini-1.5-flash-latest",
-            "gemini-1.5-pro": "gemini-1.5-pro-latest",
-            "gemini-1.5-flash-latest": "gemini-1.5-flash-latest",
-            "gemini-1.5-pro-latest": "gemini-1.5-pro-latest"
+            "gemini-1.5-flash": "gemini-1.5-flash",
+            "gemini-1.5-pro": "gemini-1.5-pro",
+            "gemini-1.5-flash-latest": "gemini-1.5-flash",
+            "gemini-1.5-pro-latest": "gemini-1.5-pro"
         }
         
-        self.model_name = model_mapping.get(model_name, "gemini-1.5-flash-latest")
+        self.model_name = model_mapping.get(model_name, "gemini-1.5-flash")
         
         # Configure Gemini API
         genai.configure(api_key=api_key)
