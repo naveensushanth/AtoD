@@ -1,13 +1,13 @@
 """
-Azure Architecture Diagram Analyzer - Core Analysis Module (FIXED)
-This module provides the DiagramAnalyzer class for analyzing Azure architecture diagrams
-using Google's Gemini AI model.
+Azure Architecture Diagram Analyzer - Core Analysis Module
+Modified for Azure OpenAI with Vision capabilities
 """
 
-import google.generativeai as genai
+from openai import AzureOpenAI
 from PIL import Image
 import json
 import io
+import base64
 from typing import Dict, List, Any
 import re
 
@@ -15,33 +15,30 @@ import re
 class DiagramAnalyzer:
     """
     Analyzer class for extracting Azure resources from architecture diagrams
-    using Google's Gemini AI model.
+    using Azure OpenAI GPT-4 Vision.
     """
     
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: str, azure_endpoint: str, deployment_name: str, api_version: str = "2024-02-15-preview"):
         """
-        Initialize the DiagramAnalyzer with API credentials.
+        Initialize the DiagramAnalyzer with Azure OpenAI credentials.
         
         Args:
-            api_key (str): Google Gemini API key
-            model_name (str): Name of the Gemini model to use
+            api_key (str): Azure OpenAI API key
+            azure_endpoint (str): Azure OpenAI endpoint URL
+            deployment_name (str): Name of the deployed model
+            api_version (str): API version to use
         """
         self.api_key = api_key
+        self.azure_endpoint = azure_endpoint
+        self.deployment_name = deployment_name
+        self.api_version = api_version
         
-        # FIX: Remove -latest suffix from model names
-        # The correct format is just "gemini-1.5-flash" not "gemini-1.5-flash-latest"
-        model_mapping = {
-            "gemini-1.5-flash": "gemini-1.5-flash",
-            "gemini-1.5-pro": "gemini-1.5-pro",
-            "gemini-1.5-flash-latest": "gemini-1.5-flash",
-            "gemini-1.5-pro-latest": "gemini-1.5-pro"
-        }
-        
-        self.model_name = model_mapping.get(model_name, "gemini-1.5-flash")
-        
-        # Configure Gemini API
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(self.model_name)
+        # Initialize Azure OpenAI client
+        self.client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=azure_endpoint
+        )
     
     def analyze_diagram(self, image: Image.Image) -> Dict[str, Any]:
         """
@@ -54,19 +51,47 @@ class DiagramAnalyzer:
             dict: Analysis results containing resources, patterns, and metadata
         """
         try:
-            # Create detailed prompt for Gemini
+            # Convert image to base64
+            base64_image = self._image_to_base64(image)
+            
+            # Create detailed prompt
             prompt = self._create_analysis_prompt()
             
-            # Generate content using Gemini
-            response = self.model.generate_content([prompt, image])
+            # Call Azure OpenAI with vision
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert Azure cloud architect analyzing architecture diagrams. You provide detailed, accurate analysis in JSON format."
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=4000,
+                temperature=0.3
+            )
             
-            # Extract and parse the JSON response
-            result = self._parse_response(response.text)
+            # Extract and parse the response
+            result = self._parse_response(response.choices[0].message.content)
             
             # Add metadata
             result['metadata'] = {
                 'success': True,
-                'model': self.model_name,
+                'model': self.deployment_name,
                 'timestamp': self._get_timestamp()
             }
             
@@ -76,6 +101,21 @@ class DiagramAnalyzer:
             return self._create_error_response(f"Failed to parse AI response as JSON: {str(e)}")
         except Exception as e:
             return self._create_error_response(f"Analysis error: {str(e)}")
+    
+    def _image_to_base64(self, image: Image.Image) -> str:
+        """
+        Convert PIL Image to base64 string.
+        
+        Args:
+            image (PIL.Image.Image): The image to convert
+            
+        Returns:
+            str: Base64 encoded image
+        """
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_bytes = buffered.getvalue()
+        return base64.b64encode(img_bytes).decode('utf-8')
     
     def _create_analysis_prompt(self) -> str:
         """

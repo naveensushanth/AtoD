@@ -1,9 +1,10 @@
 """
 Azure Cost Estimator Module
 Estimates monthly costs for Azure resources
+Modified for Azure OpenAI
 """
 
-import google.generativeai as genai
+from openai import AzureOpenAI
 from typing import Dict, Any, List
 import json
 import re
@@ -76,14 +77,18 @@ class AzureCostEstimator:
         'Log Analytics': 40.0
     }
     
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: str, azure_endpoint: str, deployment_name: str, api_version: str = "2024-02-15-preview"):
         self.api_key = api_key
-        # FIX: Remove -latest suffix
-        if model_name.endswith("-latest"):
-            model_name = model_name.replace("-latest", "")
-        self.model_name = model_name
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
+        self.azure_endpoint = azure_endpoint
+        self.deployment_name = deployment_name
+        self.api_version = api_version
+        
+        # Initialize Azure OpenAI client
+        self.client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=azure_endpoint
+        )
     
     def estimate_costs(self, analysis_result: Dict[str, Any], region: str = "East US") -> Dict[str, Any]:
         """
@@ -150,8 +155,23 @@ Be realistic - don't underestimate or overestimate. Use actual Azure pricing as 
 """
         
         try:
-            response = self.model.generate_content(prompt)
-            estimates = self._parse_cost_response(response.text)
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an Azure cost optimization expert. Provide accurate cost estimates based on current Azure pricing."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=3000,
+                temperature=0.3
+            )
+            
+            estimates = self._parse_cost_response(response.choices[0].message.content)
             
             # Validate and fallback to baseline if needed
             return self._validate_and_enhance_estimates(estimates, resources)

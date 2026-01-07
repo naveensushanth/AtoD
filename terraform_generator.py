@@ -1,9 +1,10 @@
 """
 Terraform Generator Module
 Generates Terraform code from analyzed Azure architecture
+Modified for Azure OpenAI
 """
 
-import google.generativeai as genai
+from openai import AzureOpenAI
 from typing import Dict, Any
 import re
 
@@ -11,14 +12,27 @@ import re
 class TerraformGenerator:
     """Generate Terraform code for Azure resources"""
     
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: str, azure_endpoint: str, deployment_name: str, api_version: str = "2024-02-15-preview"):
+        """
+        Initialize the TerraformGenerator with Azure OpenAI credentials.
+        
+        Args:
+            api_key (str): Azure OpenAI API key
+            azure_endpoint (str): Azure OpenAI endpoint URL
+            deployment_name (str): Name of the deployed model
+            api_version (str): API version to use
+        """
         self.api_key = api_key
-        # FIX: Remove -latest suffix
-        if model_name.endswith("-latest"):
-            model_name = model_name.replace("-latest", "")
-        self.model_name = model_name
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
+        self.azure_endpoint = azure_endpoint
+        self.deployment_name = deployment_name
+        self.api_version = api_version
+        
+        # Initialize Azure OpenAI client
+        self.client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=azure_endpoint
+        )
     
     def generate_terraform(self, analysis_result: Dict[str, Any], region: str = "East US") -> Dict[str, str]:
         """
@@ -86,8 +100,23 @@ Generate the complete main.tf file now:
 """
         
         try:
-            response = self.model.generate_content(prompt)
-            terraform_code = self._clean_code_response(response.text)
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert DevOps engineer specializing in Terraform and Azure infrastructure as code. Generate clean, production-ready Terraform code."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=4000,
+                temperature=0.3
+            )
+            
+            terraform_code = self._clean_code_response(response.choices[0].message.content)
             
             # Ensure it has provider block
             if 'provider "azurerm"' not in terraform_code:
@@ -125,8 +154,23 @@ Return ONLY the Terraform variables.tf code with no markdown formatting:
 """
         
         try:
-            response = self.model.generate_content(prompt)
-            return self._clean_code_response(response.text)
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert DevOps engineer specializing in Terraform. Generate clean variables.tf files."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=2000,
+                temperature=0.3
+            )
+            
+            return self._clean_code_response(response.choices[0].message.content)
         
         except Exception as e:
             return self._get_basic_variables_tf(region)
@@ -152,8 +196,23 @@ Return ONLY the Terraform outputs.tf code with no markdown formatting:
 """
         
         try:
-            response = self.model.generate_content(prompt)
-            return self._clean_code_response(response.text)
+            response = self.client.chat.completions.create(
+                model=self.deployment_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert DevOps engineer specializing in Terraform. Generate clean outputs.tf files."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=2000,
+                temperature=0.3
+            )
+            
+            return self._clean_code_response(response.choices[0].message.content)
         
         except Exception as e:
             return self._get_basic_outputs_tf()
