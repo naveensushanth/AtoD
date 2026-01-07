@@ -1,7 +1,7 @@
 """
 Terraform Generator Module
 Generates Terraform code from analyzed Azure architecture
-Modified for Azure OpenAI
+Modified for Azure OpenAI - Excludes Resource Group creation
 """
 
 from openai import AzureOpenAI
@@ -82,15 +82,18 @@ Generate a complete Terraform main.tf file for the following Azure resources.
 
 **Requirements:**
 1. Include proper provider configuration for Azure (azurerm)
-2. Create a resource group named "rg-terraform-deployment"
-3. Generate realistic Terraform resource blocks for each Azure service
-4. Use proper resource naming conventions (lowercase, hyphens)
-5. Include necessary dependencies between resources
-6. Add appropriate tags for all resources
-7. Use variables where appropriate (reference from variables.tf)
-8. Include comments explaining each resource block
+2. **IMPORTANT: Do NOT create a resource group - assume it already exists**
+3. Reference the existing resource group using: data.azurerm_resource_group.existing.name and data.azurerm_resource_group.existing.location
+4. Generate realistic Terraform resource blocks for each Azure service
+5. Use proper resource naming conventions (lowercase, hyphens)
+6. Include necessary dependencies between resources
+7. Add appropriate tags for all resources
+8. Use variables where appropriate (reference from variables.tf)
+9. Include comments explaining each resource block
 
-**IMPORTANT:** 
+**CRITICAL:** 
+- DO NOT include any resource group creation (no "resource "azurerm_resource_group"")
+- Use data source to reference existing resource group
 - Return ONLY the Terraform code, no markdown formatting, no explanations
 - Use valid Terraform HCL syntax
 - Make the code deployment-ready
@@ -105,7 +108,7 @@ Generate the complete main.tf file now:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert DevOps engineer specializing in Terraform and Azure infrastructure as code. Generate clean, production-ready Terraform code."
+                        "content": "You are an expert DevOps engineer specializing in Terraform and Azure infrastructure as code. Generate clean, production-ready Terraform code. NEVER create resource groups - always use existing ones via data sources."
                     },
                     {
                         "role": "user",
@@ -118,9 +121,16 @@ Generate the complete main.tf file now:
             
             terraform_code = self._clean_code_response(response.choices[0].message.content)
             
-            # Ensure it has provider block
+            # Remove any resource group creation that might have been generated
+            terraform_code = self._remove_resource_group_creation(terraform_code)
+            
+            # Ensure it has provider block and data source
             if 'provider "azurerm"' not in terraform_code:
                 terraform_code = self._add_provider_block(region) + "\n\n" + terraform_code
+            
+            # Ensure it has data source for existing resource group
+            if 'data "azurerm_resource_group"' not in terraform_code:
+                terraform_code = self._add_data_source() + "\n\n" + terraform_code
             
             return terraform_code
         
@@ -139,7 +149,7 @@ Generate a Terraform variables.tf file for the Azure infrastructure with these r
 
 Create variables for:
 1. Azure region/location
-2. Resource group name
+2. **Existing resource group name (not creating new one)**
 3. Environment (dev, staging, prod)
 4. Common tags
 5. Resource-specific configurations (SKUs, sizes, etc.)
@@ -149,6 +159,7 @@ Create variables for:
 - Include descriptions for each variable
 - Provide sensible default values
 - Use appropriate variable types
+- **IMPORTANT: Variable for resource group should indicate it's existing, not new**
 
 Return ONLY the Terraform variables.tf code with no markdown formatting:
 """
@@ -159,7 +170,7 @@ Return ONLY the Terraform variables.tf code with no markdown formatting:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert DevOps engineer specializing in Terraform. Generate clean variables.tf files."
+                        "content": "You are an expert DevOps engineer specializing in Terraform. Generate clean variables.tf files. Remember that resource groups are pre-existing, not created by this code."
                     },
                     {
                         "role": "user",
@@ -184,11 +195,13 @@ Generate a Terraform outputs.tf file for these Azure resources:
 {self._format_resources_for_prompt(resources)}
 
 Create outputs for:
-1. Resource group name and ID
+1. Resource group name and ID (from existing resource group)
 2. Important resource IDs
 3. Connection strings (where applicable)
 4. Endpoints and URLs
 5. Any other useful information for users
+
+**Note:** Resource group is existing (referenced via data source), not created.
 
 Use descriptive output names and include descriptions.
 
@@ -237,12 +250,30 @@ Return ONLY the Terraform outputs.tf code with no markdown formatting:
         cleaned = cleaned.strip()
         return cleaned
     
+    def _remove_resource_group_creation(self, terraform_code: str) -> str:
+        """Remove any resource group creation from generated code"""
+        # Pattern to match resource group resource block
+        # This handles multi-line resource blocks
+        pattern = r'resource\s+"azurerm_resource_group"\s+"[^"]+"\s*\{[^}]*\}'
+        
+        # Remove the resource group creation
+        cleaned_code = re.sub(pattern, '', terraform_code, flags=re.DOTALL)
+        
+        # Also remove any comments about resource group creation
+        cleaned_code = re.sub(r'#\s*Resource\s+Group.*\n', '', cleaned_code, flags=re.IGNORECASE)
+        
+        # Clean up multiple empty lines
+        cleaned_code = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned_code)
+        
+        return cleaned_code.strip()
+    
     def _add_provider_block(self, region: str) -> str:
-        """Add basic provider configuration"""
+        """Add basic provider configuration (without resource group)"""
         region_map = {
             "East US": "eastus",
             "West US": "westus",
             "Central US": "centralus",
+            "Central India": "centralindia",
             "North Europe": "northeurope",
             "West Europe": "westeurope",
             "Southeast Asia": "southeastasia",
@@ -266,19 +297,28 @@ Return ONLY the Terraform outputs.tf code with no markdown formatting:
 
 provider "azurerm" {{
   features {{}}
-}}
-
-# Resource Group
-resource "azurerm_resource_group" "main" {{
-  name     = var.resource_group_name
-  location = var.location
-  
-  tags = var.tags
 }}"""
     
+    def _add_data_source(self) -> str:
+        """Add data source for existing resource group"""
+        return """# Reference to existing resource group
+# The resource group must already exist in Azure
+data "azurerm_resource_group" "existing" {
+  name = var.resource_group_name
+}"""
+    
     def _get_basic_main_tf(self, region: str) -> str:
-        """Get basic main.tf template"""
-        return self._add_provider_block(region)
+        """Get basic main.tf template (without resource group creation)"""
+        provider_block = self._add_provider_block(region)
+        data_source = self._add_data_source()
+        
+        return f"""{provider_block}
+
+{data_source}
+
+# Resources will be created in the existing resource group
+# Reference: data.azurerm_resource_group.existing.name
+#           data.azurerm_resource_group.existing.location"""
     
     def _get_basic_variables_tf(self, region: str) -> str:
         """Get basic variables.tf template"""
@@ -286,6 +326,7 @@ resource "azurerm_resource_group" "main" {{
             "East US": "eastus",
             "West US": "westus",
             "Central US": "centralus",
+            "Central India": "centralindia",
             "North Europe": "northeurope",
             "West Europe": "westeurope",
             "Southeast Asia": "southeastasia",
@@ -303,7 +344,7 @@ resource "azurerm_resource_group" "main" {{
 }}
 
 variable "resource_group_name" {{
-  description = "Name of the resource group"
+  description = "Name of the existing resource group"
   type        = string
   default     = "rg-terraform-deployment"
 }}
@@ -325,20 +366,20 @@ variable "tags" {{
 }}"""
     
     def _get_basic_outputs_tf(self) -> str:
-        """Get basic outputs.tf template"""
+        """Get basic outputs.tf template (referencing existing resource group)"""
         return """output "resource_group_name" {
-  description = "Name of the resource group"
-  value       = azurerm_resource_group.main.name
+  description = "Name of the existing resource group"
+  value       = data.azurerm_resource_group.existing.name
 }
 
 output "resource_group_id" {
-  description = "ID of the resource group"
-  value       = azurerm_resource_group.main.id
+  description = "ID of the existing resource group"
+  value       = data.azurerm_resource_group.existing.id
 }
 
 output "location" {
   description = "Azure region"
-  value       = azurerm_resource_group.main.location
+  value       = data.azurerm_resource_group.existing.location
 }"""
     
     def _create_empty_terraform(self) -> Dict[str, str]:

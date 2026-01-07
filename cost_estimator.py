@@ -13,7 +13,6 @@ import re
 class AzureCostEstimator:
     """Estimate costs for Azure resources"""
     
-    # Baseline cost estimates (USD per month) - These are approximate
     BASELINE_COSTS = {
         # Compute
         'Virtual Machine': 50.0,
